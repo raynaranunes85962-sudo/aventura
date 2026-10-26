@@ -1,0 +1,202 @@
+
+aventura.html
+100%
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aventura — Floresta dos Cristais</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:#10162b; color:#f5f7ff; font-family:system-ui, sans-serif; display:flex; justify-content:center; padding:18px; }
+  .wrap { width:min(900px,100%); }
+  h1 { margin:0 0 4px; font-size:clamp(1.5rem,4vw,2.2rem); }
+  .sub { margin:0 0 14px; color:#bfc9ee; }
+  .hud { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .pill { background:#222d50; border:1px solid #3b4b7a; border-radius:999px; padding:8px 12px; font-weight:700; }
+  .gamebox { position:relative; border:3px solid #6476b5; border-radius:12px; overflow:hidden; background:#18203b; box-shadow:0 12px 36px #0007; }
+  canvas { display:block; width:100%; height:auto; image-rendering:pixelated; image-rendering:crisp-edges; }
+  .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#10162be8; padding:20px; text-align:center; }
+  .panel { max-width:440px; }
+  .panel h2 { font-size:clamp(1.4rem,4vw,2rem); margin:0 0 8px; }
+  .panel p { color:#d3dcff; line-height:1.5; }
+  button { border:0; border-radius:10px; background:#8ee36d; color:#17221b; padding:11px 17px; font-size:1rem; font-weight:800; cursor:pointer; }
+  button:hover { filter:brightness(1.07); }
+  .controls { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:12px; }
+  .dpad { display:grid; grid-template-columns:repeat(3,48px); grid-template-rows:repeat(2,44px); gap:5px; }
+  .dpad button { padding:0; font-size:1.2rem; background:#303e69; color:white; border:1px solid #6476b5; touch-action:manipulation; }
+  .dpad .up { grid-column:2; } .dpad .left {grid-column:1;grid-row:2;} .dpad .down {grid-column:2;grid-row:2;} .dpad .right {grid-column:3;grid-row:2;}
+  .hint { color:#bfc9ee; font-size:.9rem; text-align:right; }
+  @media(max-width:520px) { .controls {align-items:flex-start;} .hint {font-size:.8rem;} .dpad {grid-template-columns:repeat(3,42px);grid-template-rows:repeat(2,40px);} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🌲 Aventura: Floresta dos Cristais</h1>
+  <p class="sub">Colete cristais, evite os slimes e encontre o portal mágico!</p>
+  <div class="hud">
+    <div class="pill">💎 Pontos: <span id="score">0</span></div>
+    <div class="pill">💚 Vidas: <span id="lives">3</span></div>
+    <div class="pill">🔮 Cristais: <span id="gems">0</span>/8</div>
+  </div>
+  <div class="gamebox">
+    <canvas id="game" width="640" height="400" aria-label="Jogo de aventura em pixel art"></canvas>
+    <div class="overlay" id="overlay">
+      <div class="panel">
+        <h2 id="overlayTitle">A floresta está esperando!</h2>
+        <p id="overlayText">Use as setas do teclado ou os botões para explorar. Pegue 8 cristais e alcance o portal roxo. Cuidado com os slimes!</p>
+        <button id="startBtn">Começar aventura ▶</button>
+      </div>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="dpad" aria-label="Controles">
+      <button class="up" data-dir="up" aria-label="Cima">▲</button>
+      <button class="left" data-dir="left" aria-label="Esquerda">◀</button>
+      <button class="down" data-dir="down" aria-label="Baixo">▼</button>
+      <button class="right" data-dir="right" aria-label="Direita">▶</button>
+    </div>
+    <div class="hint">Teclado: <b>↑ ↓ ← →</b> ou <b>W A S D</b><br>Celular/tablet: use os botões.</div>
+  </div>
+</div>
+<script>
+(() => {
+const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score'), livesEl = document.getElementById('lives'), gemsEl = document.getElementById('gems');
+const overlay = document.getElementById('overlay'), titleEl = document.getElementById('overlayTitle'), textEl = document.getElementById('overlayText'), startBtn = document.getElementById('startBtn');
+const W=canvas.width,H=canvas.height,T=32, cols=W/T, rows=H/T;
+let keys={}, player, gems, enemies, walls, score, lives, running=false, won=false, lost=false, last=0, invuln=0, frame=0;
+const rand=(a,b)=>Math.random()*(b-a)+a;
+function reset(){
+  score=0;lives=3;invuln=0;frame=0;won=false;lost=false;
+  player={x:56,y:56,w:20,h:23,speed:2.5};
+  walls=[
+    {x:128,y:32,w:32,h:96},{x:128,y:160,w:32,h:64},{x:224,y:96,w:32,h:96},
+    {x:320,y:32,w:32,h:64},{x:320,y:128,w:64,h:32},{x:416,y:192,w:32,h:96},
+    {x:512,y:64,w:32,h:96},{x:64,y:256,w:96,h:32},{x:224,y:288,w:64,h:32},
+    {x:320,y:320,w:64,h:32},{x:480,y:288,w:96,h:32}
+  ];
+  gems=[];
+  const spots=[[184,56],[264,56],[376,80],[440,128],[568,176],[168,208],[264,240],[376,256],[440,336],[568,240]];
+  spots.forEach((p,i)=>gems.push({x:p[0],y:p[1],got:false,bonus:i>=8}));
+  enemies=[
+    {x:270,y:180,dx:1,dy:0,range:[250,360],axis:'x',speed:1.15},
+    {x:450,y:70,dx:0,dy:1,range:[60,150],axis:'y',speed:1.0},
+    {x:370,y:250,dx:1,dy:0,range:[350,450],axis:'x',speed:1.25},
+    {x:100,y:330,dx:0,dy:1,range:[280,365],axis:'y',speed:1.05}
+  ];
+  updateHud(); draw();
+}
+function updateHud(){scoreEl.textContent=score;livesEl.textContent=lives;gemsEl.textContent=gems.filter(g=>g.got).length;}
+function rectHit(a,b){return a.x < b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;}
+function blocked(nx,ny){
+ const r={x:nx,y:ny,w:player.w,h:player.h};
+ if(nx<4||ny<4||nx+player.w>W-4||ny+player.h>H-4)return true;
+ return walls.some(w=>rectHit(r,w));
+}
+function movePlayer(){
+ let dx=0,dy=0;
+ if(keys.ArrowLeft||keys.a||keys.A)dx--; if(keys.ArrowRight||keys.d||keys.D)dx++;
+ if(keys.ArrowUp||keys.w||keys.W)dy--; if(keys.ArrowDown||keys.s||keys.S)dy++;
+ if(dx&&dy){dx*=.707;dy*=.707;}
+ const nx=player.x+dx*player.speed, ny=player.y+dy*player.speed;
+ if(!blocked(nx,player.y))player.x=nx;
+ if(!blocked(player.x,ny))player.y=ny;
+}
+function update(){
+ if(!running)return;
+ frame++; if(invuln>0)invuln--;
+ movePlayer();
+ for(const g of gems){
+   if(!g.got && rectHit(player,{x:g.x-8,y:g.y-8,w:16,h:16})){
+     g.got=true;score+=g.bonus?25:10;updateHud();
+   }
+ }
+ for(const e of enemies){
+   if(e.axis==='x'){e.x+=e.speed*e.dx;if(e.x<e.range[0]||e.x>e.range[1])e.dx*=-1;}
+   else {e.y+=e.speed*e.dy;if(e.y<e.range[0]||e.y>e.range[1])e.dy*=-1;}
+   if(invuln===0 && rectHit(player,{x:e.x-3,y:e.y-3,w:25,h:25})){
+     lives--;invuln=100;score=Math.max(0,score-10);updateHud();
+     if(lives<=0){finish(false);return;}
+   }
+ }
+ const collected=gems.filter(g=>g.got).length;
+ const portal={x:584,y:330,w:34,h:42};
+ if(rectHit(player,portal)){
+   if(collected>=8){score+=50;updateHud();finish(true);return;}
+   // Friendly reminder, no penalty
+ }
+}
+function pixelRect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),w,h);}
+function draw(){
+ // grassy tile background
+ ctx.fillStyle='#234c43';ctx.fillRect(0,0,W,H);
+ for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+   if((x*7+y*11)%5===0)pixelRect(x*T+7,y*T+9,3,3,'#2d6550');
+   if((x*3+y*5)%9===0)pixelRect(x*T+21,y*T+22,2,2,'#397457');
+ }
+ // path tiles
+ for(let y=0;y<rows;y++)for(let x=0;x<cols;x++)if((x>3&&x<18&&y>3&&y<10)&&((x+y)%3===0))pixelRect(x*T+1,y*T+1,30,30,'#285348');
+ // decorative trees
+ [[30,25],[94,88],[190,340],[290,45],[580,40],[40,180],[610,250],[350,365]].forEach(([x,y])=>{
+   pixelRect(x-7,y+6,23,18,'#65452e');pixelRect(x-12,y-7,32,23,'#1a3c36');pixelRect(x-7,y-13,22,17,'#2d7651');pixelRect(x-2,y-18,12,9,'#398b5b');
+ });
+ // walls / fallen logs
+ for(const w of walls){
+   pixelRect(w.x,w.y,w.w,w.h,'#55452f');pixelRect(w.x+3,w.y+3,w.w-6,w.h-6,'#755536');
+   for(let x=w.x+6;x<w.x+w.w-3;x+=12)pixelRect(x,w.y+5,3,Math.max(5,w.h-10),'#8b6840');
+   pixelRect(w.x,w.y,w.w,4,'#3c382b');
+ }
+ // portal
+ const pulse=Math.sin(frame*.12)*3;
+ pixelRect(584,329,34,43,'#482a78');pixelRect(589,333,24,34,'#a65dff');pixelRect(594,337,14,26,'#e0a7ff');
+ pixelRect(598,340+pulse,6,19,'#fff0ff');
+ // gems
+ for(const g of gems)if(!g.got){
+   const bob=Math.sin(frame*.1+g.x)*2;
+   pixelRect(g.x-5,g.y-7+bob,10,14,g.bonus?'#ffcf56':'#57f5ff');
+   pixelRect(g.x-3,g.y-4+bob,6,8,g.bonus?'#fff1a6':'#c9ffff');
+   pixelRect(g.x-2,g.y-9+bob,4,3,'#ffffff');
+ }
+ // enemies slime sprites
+ for(const e of enemies){
+   pixelRect(e.x,e.y+8,20,12,'#1c2737');pixelRect(e.x-2,e.y+2,24,13,'#8ce65d');pixelRect(e.x+2,e.y-2,16,7,'#a9ff78');
+   pixelRect(e.x+4,e.y+6,3,4,'#17222b');pixelRect(e.x+14,e.y+6,3,4,'#17222b');
+   pixelRect(e.x+5,e.y+7,2,2,'#fff');pixelRect(e.x+15,e.y+7,2,2,'#fff');
+ }
+ // hero blinking after hit
+ if(invuln===0||Math.floor(frame/5)%2===0){
+   const x=player.x,y=player.y;
+   pixelRect(x+4,y+18,5,5,'#2b263b');pixelRect(x+13,y+18,5,5,'#2b263b');
+   pixelRect(x+3,y+7,15,13,'#e6b07d');pixelRect(x+2,y+3,17,7,'#613b27');
+   pixelRect(x+5,y,12,6,'#75482b');pixelRect(x+5,y+9,3,4,'#29243a');pixelRect(x+14,y+9,3,4,'#29243a');
+   pixelRect(x+1,y+13,4,7,'#4388e8');pixelRect(x+17,y+13,4,7,'#4388e8');pixelRect(x+5,y+14,11,5,'#3673cb');
+   pixelRect(x+7,y+11,2,2,'#fff');pixelRect(x+15,y+11,2,2,'#fff');
+ }
+ // small instruction marker near portal
+ ctx.fillStyle='#f3e6ff';ctx.font='10px monospace';ctx.fillText('PORTAL',575,321);
+}
+function finish(win){
+ running=false;won=win;lost=!win;overlay.style.display='flex';
+ titleEl.textContent=win?'🏆 Tesouro encontrado!':'💫 Fim de jogo!';
+ textEl.textContent=win?`Você escapou da floresta com ${score} pontos! Incrível, aventureiro!`:`Você fez ${score} pontos. Tente novamente e desvie dos slimes!`;
+ startBtn.textContent='Jogar novamente ↻';
+}
+function loop(t){if(t-last>16){update();draw();last=t;}requestAnimationFrame(loop);}
+startBtn.addEventListener('click',()=>{reset();overlay.style.display='none';running=true;});
+document.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key]=true;});
+document.addEventListener('keyup',e=>keys[e.key]=false);
+document.querySelectorAll('[data-dir]').forEach(btn=>{
+ const map={up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight'};
+ const down=e=>{e.preventDefault();keys[map[btn.dataset.dir]]=true;};
+ const up=e=>{e.preventDefault();keys[map[btn.dataset.dir]]=false;};
+ btn.addEventListener('pointerdown',down);btn.addEventListener('pointerup',up);btn.addEventListener('pointerleave',up);btn.addEventListener('pointercancel',up);
+});
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
+Exibindo aventura.html…
